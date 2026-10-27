@@ -172,6 +172,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         let mut v = Vec::new();
         v.extend(file::specs());
         v.extend(crate::models::specs());
+        v.extend(crate::library::specs());
         v.extend(edit::specs());
         v.extend(comp::specs());
         v.extend(layer::specs());

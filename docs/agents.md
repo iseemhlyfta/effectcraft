@@ -585,7 +585,8 @@ that closes the dialog). File ▸ Scripts: `file.scripts.list`, `file.runScript 
 `file.installScript` / `file.installScriptUIPanel {"path": …}`, `window.scriptPanel {"name": …}`,
 `window.restoreScriptPanels` (the panels open when the app last quit). Scripts' `app.settings`:
 `script.settings.get {"section": …, "key": …}` and `script.settings.save {…, "value": …}`.
-Extension points and the bundled extensions: [plugins.md](plugins.md).
+Extension points and the bundled extensions: [plugins.md](plugins.md); publishing an effect plug-in
+in the Plug-in Library: [publishing-plugins.md](publishing-plugins.md).
 
 ### Timeline: layer order, properties and shortcuts
 
