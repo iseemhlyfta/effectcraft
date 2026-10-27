@@ -699,12 +699,15 @@ fn library_preview_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, i
         return;
     };
     let ctx = ui.ctx().clone();
-    // Textures: the sample frame, then the effect's frames (built once per package version).
-    let key = egui::Id::unique(("library-preview", &pv.id, &pv.version));
+    // Textures: the sample frame, then the effect's frames. One set, tagged with its package
+    // version and replaced when another is previewed (the engine keeps only the last preview).
+    let key = egui::Id::unique("library-preview");
+    let tag = (pv.id.clone(), pv.version.clone());
     let size = [pv.width as usize, pv.height as usize];
-    let tex: Vec<egui::TextureHandle> = match ctx.data(|d| d.get_temp::<Vec<egui::TextureHandle>>(key)) {
-        Some(v) => v,
-        None => {
+    let cached = ctx.data(|d| d.get_temp::<((String, String), Vec<egui::TextureHandle>)>(key));
+    let tex: Vec<egui::TextureHandle> = match cached {
+        Some((t, v)) if t == tag => v,
+        _ => {
             let v: Vec<egui::TextureHandle> = std::iter::once(&pv.before)
                 .chain(&pv.frames)
                 .enumerate()
@@ -713,7 +716,7 @@ fn library_preview_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, i
                     ctx.load_texture(format!("library-preview-{i}"), egui::ColorImage::from_rgba_unmultiplied(size, px), egui::TextureOptions::LINEAR)
                 })
                 .collect();
-            ctx.data_mut(|d| d.insert_temp(key, v.clone()));
+            ctx.data_mut(|d| d.insert_temp(key, (tag, v.clone())));
             v
         }
     };
