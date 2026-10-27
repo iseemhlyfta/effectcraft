@@ -76,6 +76,7 @@ pub use settings::config;
 pub use settings::prefs;
 pub use settings::shortcuts;
 pub use system::guard;
+pub use system::library;
 pub use system::logging;
 pub use system::perf;
 pub use system::storage;
@@ -193,6 +194,11 @@ pub struct Session {
     /// Loads WebAssembly effect plug-ins (set by the host that links `effectcraft-plugin` with
     /// its runtime): `effect.plugins.load`.
     pub plugin_loader: Option<PluginLoader>,
+    /// Where effect plug-ins live (hosts set it; else `Plug-ins` next to the settings): the
+    /// Plug-in Library installs into its `Library` folder ([`library`]).
+    pub plugins_dir: Option<std::path::PathBuf>,
+    /// The Plug-in Library's catalog, worker status and the packages this session loaded.
+    pub library: library::Library,
     /// ScriptUI windows and panels opened by scripts (see [`scriptui`]).
     pub script_ui: scriptui::ScriptUi,
     /// The last physical-memory reading (Settings ▸ Memory & CPU budgets); `None` = unknown
@@ -323,6 +329,8 @@ impl Default for Session {
             snapshot: None,
             script: None,
             plugin_loader: None,
+            plugins_dir: None,
+            library: Default::default(),
             script_ui: scriptui::ScriptUi::default(),
             sys_memory: None,
             key_move: None,

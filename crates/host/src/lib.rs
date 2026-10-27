@@ -91,6 +91,7 @@ pub fn session() -> Session {
         expr: Some(Arc::new(effectcraft_expr::Expressions)),
         expr_check: Some(effectcraft_expr::check_syntax),
         plugin_loader: effectcraft_plugin::wasm_available().then_some(effectcraft_plugin::loader as effectcraft_engine::PluginLoader),
+        plugins_dir: config_dir().map(|d| d.join("Plug-ins")),
         ..Default::default()
     };
     effectcraft_script::install(&mut s);

@@ -72,6 +72,7 @@ fn page_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, page: &Page, cur: &Value
             Item::Labels => labels_ui(app, ui, cur, acts),
             Item::BrowserStorage => browser_storage_ui(app, ui, t, acts),
             Item::Models(task) => models_ui(app, ui, t, acts, task),
+            Item::PluginLibrary => library_ui(app, ui, t, acts),
             Item::AudioDevices { key } => {
                 let devices: Vec<String> = app.hooks.audio_devices.as_ref().map(|f| f()).unwrap_or_default();
                 let sel = get(key).as_str().unwrap_or("").to_string();
@@ -510,6 +511,138 @@ fn models_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, acts: &mut
         ui.label(RichText::new(tr("Trained models are available in the desktop app; the browser uses the classic engine.")).color(t.text_dim));
     } else if let Some(f) = info["folder"].as_str() {
         ui.label(RichText::new(tr_args("Models folder: {}", &[&f])).color(t.text_faint));
+    }
+}
+
+/// Settings ▸ Plug-in Library (`library.*`): search the community catalog, install, update and
+/// remove packages. Automation ids: `settings.library.query`, `settings.library.refresh`,
+/// `settings.library.updateAll`, `settings.library.<install|update|remove>.<package id>`.
+fn library_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, acts: &mut Vec<Act>) {
+    let query = app.dialog_state.library_query.clone();
+    let Ok(info) = app.session.execute("library.list", json!({"query": query})) else { return };
+    if !info["available"].as_bool().unwrap_or(false) {
+        ui.label(RichText::new(tr("The Plug-in Library is available in the desktop app.")).color(t.text_dim));
+        return;
+    }
+    let busy = info["busy"].as_str().map(str::to_string);
+    let packages = info["packages"].as_array().cloned().unwrap_or_default();
+    let has_catalog = info["catalog"].is_string();
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        let mut q = query.clone();
+        let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text(tr("Search plug-ins and effects")).desired_width(260.0));
+        reg(app, "settings.library.query", &r, "Search");
+        if q != query {
+            app.dialog_state.library_query = q;
+        }
+        let label = if has_catalog { tr("Refresh") } else { tr("Fetch Catalog") };
+        let r = ui.add_enabled(busy.is_none(), egui::Button::new(label));
+        reg(app, "settings.library.refresh", &r, "Refresh");
+        if r.clicked() {
+            acts.push(Act::Run("library.refresh".into(), json!({})));
+        }
+        let updates = packages.iter().filter(|p| p["updateAvailable"].as_bool().unwrap_or(false)).count();
+        if updates > 0 {
+            let r = ui.add_enabled(busy.is_none(), egui::Button::new(tr_args("Update All ({})", &[&updates])));
+            reg(app, "settings.library.updateAll", &r, "Update All");
+            if r.clicked() {
+                acts.push(Act::Run("library.update".into(), json!({})));
+            }
+        }
+    });
+    if let Some(when) = info["fetched"].as_str() {
+        let when = when.get(..16).unwrap_or(when).replace('T', " ");
+        ui.label(RichText::new(tr_args("Catalog fetched {} (UTC)", &[&when])).color(t.text_faint));
+    } else if !has_catalog {
+        ui.label(RichText::new(tr("Nothing is downloaded until you fetch the catalog.")).color(t.text_dim));
+    }
+    for p in &packages {
+        let id = p["id"].as_str().unwrap_or_default().to_string();
+        let name = p["name"].as_str().unwrap_or_default();
+        let s = |k: &str| p[k].as_str().unwrap_or_default().to_string();
+        let installed = p["installed"].as_str().map(str::to_string);
+        let (update, restart, newer_app) =
+            (p["updateAvailable"].as_bool().unwrap_or(false), p["restartNeeded"].as_bool().unwrap_or(false), p["needsNewerApp"].as_bool().unwrap_or(false));
+        ui.add_space(6.0);
+        egui::Frame::new().fill(t.field_bg).corner_radius(6.0).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(name).font(Tokens::semibold(12.5)));
+                if let Some(v) = p["latest"].as_str() {
+                    ui.label(RichText::new(v).color(t.text_dim));
+                }
+                let state = match (&installed, restart, update) {
+                    (_, true, _) => tr("Restart EffectCraft to finish").to_string(),
+                    (Some(v), _, true) => tr_args("Installed {}: update available", &[v]),
+                    (Some(v), _, _) => tr_args("Installed {}", &[v]),
+                    (None, _, _) if newer_app && p["latest"].is_null() => tr("Needs a newer EffectCraft").to_string(),
+                    _ => String::new(),
+                };
+                ui.label(RichText::new(state).color(if installed.is_some() { t.accent } else { t.text_dim }));
+            });
+            if !s("description").is_empty() {
+                ui.label(RichText::new(s("description")).color(t.text_dim));
+            }
+            ui.horizontal_wrapped(|ui| {
+                if !s("author").is_empty() {
+                    ui.label(RichText::new(tr_args("By {}", &[&s("author")])).color(t.text_dim));
+                }
+                if !s("license").is_empty() {
+                    ui.label(RichText::new(tr_args("Licence: {}", &[&s("license")])).color(t.text_dim));
+                }
+                if let Some(size) = p["size"].as_u64() {
+                    ui.label(RichText::new(format!("·  {}", human_bytes(size))).color(t.text_dim));
+                }
+                let repo = s("repo");
+                if repo.starts_with("https://") && ui.link(tr("Source")).clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(repo));
+                }
+            });
+            let effects: Vec<&str> = p["effects"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+            if !effects.is_empty() {
+                ui.label(RichText::new(tr_args("Effects: {}", &[&effects.join(", ")])).color(t.text_faint));
+            }
+            ui.horizontal(|ui| {
+                if installed.is_none() && !p["latest"].is_null() {
+                    let r = ui.add_enabled(busy.is_none(), egui::Button::new(tr("Install")));
+                    reg(app, &format!("settings.library.install.{id}"), &r, "Install");
+                    if r.clicked() {
+                        acts.push(Act::Run("library.install".into(), json!({"id": id})));
+                    }
+                }
+                if update {
+                    let r = ui.add_enabled(busy.is_none(), egui::Button::new(tr("Update")));
+                    reg(app, &format!("settings.library.update.{id}"), &r, "Update");
+                    if r.clicked() {
+                        acts.push(Act::Run("library.update".into(), json!({"id": id})));
+                    }
+                }
+                if installed.is_some() {
+                    let r = ui.add_enabled(busy.is_none(), egui::Button::new(tr("Remove")));
+                    reg(app, &format!("settings.library.remove.{id}"), &r, "Remove");
+                    if r.clicked() {
+                        acts.push(Act::Run("library.uninstall".into(), json!({"id": id})));
+                    }
+                }
+            });
+        });
+    }
+    if has_catalog && packages.is_empty() {
+        let note = if query.is_empty() { tr("The catalog lists no plug-ins yet.") } else { tr("No plug-ins match the search.") };
+        ui.label(RichText::new(note).color(t.text_dim));
+    }
+    if let Some(b) = &busy {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(b);
+        });
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+    }
+    if let Some(e) = info["error"].as_str() {
+        ui.label(RichText::new(e).color(t.danger));
+    }
+    if let Some(f) = info["folder"].as_str() {
+        ui.label(RichText::new(tr_args("Plug-ins folder: {}", &[&f])).color(t.text_faint));
     }
 }
 

@@ -37,6 +37,8 @@ pub struct DialogState {
     pub palette_sel: usize,
     /// Settings dialog page id (`general`, `appearance`…).
     pub settings_page: String,
+    /// Settings ▸ Plug-in Library: the search field.
+    pub library_query: String,
     /// Settings when the dialog opened (Cancel restores them).
     pub prefs_snapshot: Option<effectcraft_engine::prefs::Prefs>,
     /// Keyboard Shortcuts editor.
