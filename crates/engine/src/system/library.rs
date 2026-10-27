@@ -169,11 +169,13 @@ pub struct Library {
 }
 
 impl Library {
+    /// A copy of the current status.
     pub fn status(&self) -> Status {
         self.status.lock().map(|s| s.clone()).unwrap_or_default()
     }
 }
 
+/// Change the shared status (a poisoned lock is skipped, not a panic).
 fn set(status: &Arc<Mutex<Status>>, f: impl FnOnce(&mut Status)) {
     if let Ok(mut s) = status.lock() {
         f(&mut s);
@@ -228,10 +230,12 @@ pub fn valid_id(id: &str) -> bool {
     (1..=100).contains(&id.len()) && !id.starts_with('.') && !id.contains("..") && id.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 
+/// 64 hex digits.
 fn valid_sha(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// Why a release can't be used, if it can't.
 fn release_problem(r: &Release) -> Option<String> {
     if version_key(&r.version).is_none() {
         return Some(format!("bad version `{}`", r.version));
@@ -414,10 +418,12 @@ fn fetch(src: &Source, max: u64, tmp_dir: &Path) -> std::result::Result<Vec<u8>,
 
 // ---------------------------------------------------------------- installed packages
 
+/// `installed.json`; missing or unreadable is an empty library.
 fn read_installed(dir: &Path) -> Installed {
     std::fs::read(dir.join(INSTALLED_FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
+/// Write `installed.json`.
 fn write_installed(dir: &Path, inst: &Installed) -> std::result::Result<(), String> {
     use crate::config::FileOps;
     let text = serde_json::to_vec_pretty(inst).map_err(|e| e.to_string())?;
@@ -562,6 +568,7 @@ fn spawn(status: &Arc<Mutex<Status>>, what: String, wait: bool, job: impl FnOnce
 
 // ---------------------------------------------------------------- commands
 
+/// The library needs files and `curl`: not in the web build.
 fn desktop_only(c: &str) -> Result<()> {
     if cfg!(target_arch = "wasm32") {
         return Err(bad(c, "the Plug-in Library is available in the desktop app"));
@@ -569,6 +576,7 @@ fn desktop_only(c: &str) -> Result<()> {
     Ok(())
 }
 
+/// Fails while the worker runs a job (it takes one at a time).
 fn idle(s: &Session, c: &str) -> Result<()> {
     match s.library.status().busy {
         Some(b) => Err(bad(c, format!("the Plug-in Library is busy ({b})"))),
@@ -600,6 +608,7 @@ fn catalog(s: &Session) -> Option<(String, Arc<Catalog>)> {
     Some(c)
 }
 
+/// `library.refresh`: fetch the catalog (`catalog`, else the community one) and keep a copy for offline use.
 fn refresh(s: &mut Session, p: &Value) -> Result<Value> {
     let c = "library.refresh";
     desktop_only(c)?;
@@ -638,12 +647,14 @@ fn refresh(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"refreshing": true}))
 }
 
+/// `q` (case-insensitive) is in the package's id, name, author, description, tags or effect ids.
 fn matches(p: &Package, q: &str) -> bool {
     let q = q.to_lowercase();
     let latest = p.versions.iter().flat_map(|r| r.effects.iter());
     [&p.id, &p.name, &p.author, &p.description].into_iter().chain(p.tags.iter()).chain(latest).any(|f| f.to_lowercase().contains(&q))
 }
 
+/// One package as `library.list` reports it.
 fn package_json(p: &Package, inst: Option<&InstalledPackage>, st: &Status) -> Value {
     let latest = latest_compatible(p);
     let newest_any = p.versions.iter().map(|r| r.version.as_str()).fold(None, |b: Option<&str>, v| if b.is_none_or(|b| newer(v, b)) { Some(v) } else { b });
@@ -670,6 +681,7 @@ fn package_json(p: &Package, inst: Option<&InstalledPackage>, st: &Status) -> Va
     })
 }
 
+/// `library.list`: the catalog packages with their install state, filtered, and installed ones it no longer lists.
 fn list(s: &mut Session, p: &Value) -> Result<Value> {
     let cat = catalog(s);
     let st = s.library.status();
@@ -713,6 +725,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
     }))
 }
 
+/// `library.install`: download, check and load a release (`version`, else the newest compatible).
 fn install(s: &mut Session, p: &Value) -> Result<Value> {
     let c = "library.install";
     desktop_only(c)?;
@@ -806,6 +819,7 @@ fn to_rgba8(px: &[[f32; 4]]) -> Vec<u8> {
         .collect()
 }
 
+/// `library.preview`'s reply: size, frame count, whether the effect changes anything, and the manifest.
 fn preview_json(v: &Preview) -> Value {
     json!({
         "id": v.id,
@@ -863,6 +877,7 @@ fn preview(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"id": pid, "version": version, "previewing": true}))
 }
 
+/// `library.update`: install the newest compatible release of every package (or `id`) with an update.
 fn update(s: &mut Session, p: &Value) -> Result<Value> {
     let c = "library.update";
     let list = list(s, &json!({"installed": true}))?;
@@ -894,6 +909,7 @@ fn update(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"updating": due}))
 }
 
+/// `library.uninstall`: forget the package and delete its folder; loaded effects stay until restart.
 fn uninstall(s: &mut Session, p: &Value) -> Result<Value> {
     let c = "library.uninstall";
     idle(s, c)?;
@@ -950,6 +966,7 @@ fn missing(s: &mut Session, _: &Value) -> Result<Value> {
     Ok(json!({"effects": found}))
 }
 
+/// The `library.*` commands.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         query!(
@@ -1003,6 +1020,7 @@ pub fn specs() -> Vec<CommandSpec> {
 mod tests {
     use super::*;
 
+    /// A release of `version` for `api`, with a valid GitHub URL and checksum.
     fn rel(version: &str, api: u32, min_app: Option<&str>) -> Release {
         Release {
             version: version.into(),

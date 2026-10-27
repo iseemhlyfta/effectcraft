@@ -18,11 +18,13 @@ fn tmp(name: &str) -> PathBuf {
     d
 }
 
+/// `p` as a `file://` URL (`file:///C:/…` on Windows).
 fn file_url(p: &Path) -> String {
     let s = p.to_string_lossy().replace('\\', "/");
     if s.starts_with('/') { format!("file://{s}") } else { format!("file:///{s}") }
 }
 
+/// A host session that installs into `dir`.
 fn session(dir: &Path) -> Session {
     let mut s = effectcraft_host::session();
     s.plugins_dir = Some(dir.join("Plug-ins"));
@@ -44,14 +46,17 @@ fn write_catalog(dir: &Path, packages: Value) -> String {
     file_url(&path)
 }
 
+/// A catalog release entry for a served module.
 fn release(version: &str, (url, sha): &(String, String), effect: &str) -> Value {
     json!({"version": version, "api": 1, "url": url, "sha256": sha, "effects": [effect]})
 }
 
+/// The package `id` in a `library.list` reply.
 fn package<'a>(list: &'a Value, id: &str) -> &'a Value {
     list["packages"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap_or_else(|| panic!("no {id} in {list}"))
 }
 
+/// The effect ids registered in the process.
 fn plugin_ids(s: &mut Session) -> Vec<String> {
     let l = s.execute("effect.plugins.list", json!({})).unwrap();
     l["plugins"].as_array().unwrap().iter().filter_map(|p| p["id"].as_str().map(str::to_string)).collect()
