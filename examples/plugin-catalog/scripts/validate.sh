@@ -27,7 +27,10 @@ file_url() {
 
 echo "== 1. schema"
 [ "$(wc -c <"$catalog")" -le $((4 << 20)) ] || fail "the catalog is larger than 4 MB (the app's limit)"
-jq empty "$catalog" || fail "$catalog isn't valid JSON"
+# Exactly one object of format 1 with a packages array (an empty file or a second value fails too),
+# checked even when the schema step is skipped.
+jq -e -s 'length == 1 and (.[0] | type == "object" and .schema == 1 and (.packages | type == "array"))' "$catalog" >/dev/null \
+  || fail "$catalog isn't one JSON object with \"schema\": 1 and a \"packages\" array"
 if [ "${SKIP_SCHEMA:-}" = 1 ]; then
   echo "skipped (SKIP_SCHEMA=1)"
 else
