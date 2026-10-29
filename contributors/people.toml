@@ -102,3 +102,11 @@ display_name = "ki2pixel"
 [people.iseemhlyfta]
 display_name = "iseemhlyfta"
 sync_github_name = false
+
+[people.becauseno7]
+real_name = "Shuvra Basak"
+display_name = "Shuvra Basak"
+sync_github_name = false
+
+[people.ashokram-si]
+real_name = "Ashok Ram"
