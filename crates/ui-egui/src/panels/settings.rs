@@ -733,9 +733,10 @@ fn library_preview_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, i
     let key = egui::Id::unique("library-preview");
     let tag = (pv.id.clone(), pv.version.clone());
     let size = [pv.width as usize, pv.height as usize];
-    let cached = ctx.data(|d| d.get_temp::<((String, String), Vec<egui::TextureHandle>)>(key));
-    let tex: Vec<egui::TextureHandle> = match cached {
-        Some((t, v)) if t == tag => v,
+    // Cached per preview: its textures, whether it moves, whether it changes the frame at all.
+    let cached = ctx.data(|d| d.get_temp::<((String, String), Vec<egui::TextureHandle>, bool, bool)>(key));
+    let (tex, animated, unchanged) = match cached {
+        Some((t, v, animated, unchanged)) if t == tag => (v, animated, unchanged),
         _ => {
             let v: Vec<egui::TextureHandle> = std::iter::once(&pv.before)
                 .chain(&pv.frames)
@@ -745,13 +746,14 @@ fn library_preview_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, i
                     ctx.load_texture(format!("library-preview-{i}"), egui::ColorImage::from_rgba_unmultiplied(size, px), egui::TextureOptions::LINEAR)
                 })
                 .collect();
-            ctx.data_mut(|d| d.insert_temp(key, (tag, v.clone())));
-            v
+            let animated = pv.frames.windows(2).any(|w| w.first() != w.last());
+            let unchanged = pv.frames.iter().all(|f| *f == pv.before);
+            ctx.data_mut(|d| d.insert_temp(key, (tag, v.clone(), animated, unchanged)));
+            (v, animated, unchanged)
         }
     };
     let (Some(before), true) = (tex.first(), tex.len() > 1) else { return };
     let frames = tex.get(1..).unwrap_or_default();
-    let animated = pv.frames.windows(2).any(|w| w.first() != w.last());
     let index = if animated { (ctx.input(|i| i.time) * pv.fps) as usize % frames.len() } else { 0 };
     let Some(after) = frames.get(index) else { return };
     if animated {
@@ -783,7 +785,7 @@ fn library_preview_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, i
         line = format!("{line} · {}", tr_args("Parameters: {}", &[&params.join(", ")]));
     }
     ui.label(RichText::new(line).color(t.text_faint));
-    if pv.frames.iter().all(|f| *f == pv.before) {
+    if unchanged {
         ui.label(RichText::new(tr("At its default settings this effect leaves the sample frame unchanged.")).color(t.text_dim));
     }
 }
