@@ -541,28 +541,7 @@ fn library_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, acts: &mu
     let packages = info["packages"].as_array().cloned().unwrap_or_default();
     let has_catalog = info["catalog"].is_string();
     ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        let mut q = query.clone();
-        let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text(tr("Search plug-ins and effects")).desired_width(260.0));
-        reg(app, "settings.library.query", &r, "Search");
-        if q != query {
-            app.dialog_state.library_query = q;
-        }
-        let label = if has_catalog { tr("Refresh") } else { tr("Fetch Catalog") };
-        let r = ui.add_enabled(busy.is_none(), egui::Button::new(label));
-        reg(app, "settings.library.refresh", &r, "Refresh");
-        if r.clicked() {
-            acts.push(Act::Run("library.refresh".into(), json!({})));
-        }
-        let updates = packages.iter().filter(|p| p["updateAvailable"].as_bool().unwrap_or(false)).count();
-        if updates > 0 {
-            let r = ui.add_enabled(busy.is_none(), egui::Button::new(tr_args("Update All ({})", &[&updates])));
-            reg(app, "settings.library.updateAll", &r, "Update All");
-            if r.clicked() {
-                acts.push(Act::Run("library.update".into(), json!({})));
-            }
-        }
-    });
+    library_toolbar_ui(app, ui, &query, &packages, has_catalog, busy.is_none(), acts);
     if let Some(when) = info["fetched"].as_str() {
         let when = when.get(..16).unwrap_or(when).replace('T', " ");
         ui.label(RichText::new(tr_args("Catalog fetched {} (UTC)", &[&when])).color(t.text_faint));
@@ -575,106 +554,8 @@ fn library_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, acts: &mu
         ui.label(RichText::new(tr("Nothing is downloaded until you fetch the catalog.")).color(t.text_dim));
     }
     for p in &packages {
-        let id = p["id"].as_str().unwrap_or_default().to_string();
-        let name = p["name"].as_str().unwrap_or_default();
-        let s = |k: &str| p[k].as_str().unwrap_or_default().to_string();
-        let installed = p["installed"].as_str().map(str::to_string);
-        let (update, restart, newer_app) =
-            (p["updateAvailable"].as_bool().unwrap_or(false), p["restartNeeded"].as_bool().unwrap_or(false), p["needsNewerApp"].as_bool().unwrap_or(false));
         ui.add_space(6.0);
-        egui::Frame::new().fill(t.field_bg).corner_radius(6.0).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(name).font(Tokens::semibold(12.5)));
-                if let Some(v) = p["latest"].as_str() {
-                    ui.label(RichText::new(v).color(t.text_dim));
-                }
-                let state = match (&installed, restart, update) {
-                    (_, true, _) => tr("Restart EffectCraft to finish").to_string(),
-                    (Some(v), _, true) => tr_args("Installed {}: update available", &[v]),
-                    (Some(v), _, _) => tr_args("Installed {}", &[v]),
-                    (None, _, _) if newer_app && p["latest"].is_null() => tr("Needs a newer EffectCraft").to_string(),
-                    _ => String::new(),
-                };
-                ui.label(RichText::new(state).color(if installed.is_some() { t.accent } else { t.text_dim }));
-            });
-            if !s("description").is_empty() {
-                ui.label(RichText::new(s("description")).color(t.text_dim));
-            }
-            ui.horizontal_wrapped(|ui| {
-                if !s("author").is_empty() {
-                    ui.label(RichText::new(tr_args("By {}", &[&s("author")])).color(t.text_dim));
-                }
-                if !s("license").is_empty() {
-                    ui.label(RichText::new(tr_args("Licence: {}", &[&s("license")])).color(t.text_dim));
-                }
-                if let Some(size) = p["size"].as_u64() {
-                    ui.label(RichText::new(format!("·  {}", human_bytes(size))).color(t.text_dim));
-                }
-                let repo = s("repo");
-                if repo.starts_with("https://") {
-                    let label = if repo.starts_with("https://github.com/") { tr("Open on GitHub") } else { tr("Source") };
-                    let r = ui.link(label);
-                    reg(app, &format!("settings.library.repo.{id}"), &r, "Source");
-                    if r.clicked() {
-                        ui.ctx().open_url(egui::OpenUrl::new_tab(repo));
-                    }
-                }
-                let video = s("video");
-                if video.starts_with("https://") {
-                    let r = ui.link(tr("Watch video"));
-                    reg(app, &format!("settings.library.video.{id}"), &r, "Watch video");
-                    if r.clicked() {
-                        ui.ctx().open_url(egui::OpenUrl::new_tab(video));
-                    }
-                }
-            });
-            let effects: Vec<&str> = p["effects"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-            if !effects.is_empty() {
-                ui.label(RichText::new(tr_args("Effects: {}", &[&effects.join(", ")])).color(t.text_faint));
-            }
-            let showing = app.dialog_state.library_preview.as_deref() == Some(id.as_str());
-            ui.horizontal(|ui| {
-                if !p["latest"].is_null() {
-                    let r = ui
-                        .add_enabled(busy.is_none() || showing, egui::Button::new(if showing { tr("Hide Preview") } else { tr("Preview") }).selected(showing));
-                    reg(app, &format!("settings.library.preview.{id}"), &r, "Preview");
-                    if r.clicked() {
-                        if showing {
-                            app.dialog_state.library_preview = None;
-                        } else {
-                            app.dialog_state.library_preview = Some(id.clone());
-                            app.dialog_state.library_split = 0.5;
-                            acts.push(Act::Run("library.preview".into(), json!({"id": id})));
-                        }
-                    }
-                }
-                if installed.is_none() && !p["latest"].is_null() {
-                    let r = ui.add_enabled(busy.is_none(), egui::Button::new(tr("Install")));
-                    reg(app, &format!("settings.library.install.{id}"), &r, "Install");
-                    if r.clicked() {
-                        acts.push(Act::Run("library.install".into(), json!({"id": id})));
-                    }
-                }
-                if update {
-                    let r = ui.add_enabled(busy.is_none(), egui::Button::new(tr("Update")));
-                    reg(app, &format!("settings.library.update.{id}"), &r, "Update");
-                    if r.clicked() {
-                        acts.push(Act::Run("library.update".into(), json!({"id": id})));
-                    }
-                }
-                if installed.is_some() {
-                    let r = ui.add_enabled(busy.is_none(), egui::Button::new(tr("Remove")));
-                    reg(app, &format!("settings.library.remove.{id}"), &r, "Remove");
-                    if r.clicked() {
-                        acts.push(Act::Run("library.uninstall".into(), json!({"id": id})));
-                    }
-                }
-            });
-            if showing {
-                library_preview_ui(app, ui, t, &id);
-            }
-        });
+        library_card_ui(app, ui, t, p, busy.is_none(), acts);
     }
     if has_catalog && packages.is_empty() {
         let note = if query.is_empty() { tr("The catalog lists no plug-ins yet.") } else { tr("No plug-ins match the search.") };
@@ -693,6 +574,141 @@ fn library_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, acts: &mu
     if let Some(f) = info["folder"].as_str() {
         ui.label(RichText::new(tr_args("Plug-ins folder: {}", &[&f])).color(t.text_faint));
     }
+}
+
+/// The Plug-in Library's search field, Refresh (or Fetch Catalog) and Update All.
+fn library_toolbar_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, query: &str, packages: &[Value], has_catalog: bool, idle: bool, acts: &mut Vec<Act>) {
+    ui.horizontal(|ui| {
+        let mut q = query.to_string();
+        let r = ui.add(egui::TextEdit::singleline(&mut q).hint_text(tr("Search plug-ins and effects")).desired_width(260.0));
+        reg(app, "settings.library.query", &r, "Search");
+        if q != query {
+            app.dialog_state.library_query = q;
+        }
+        let label = if has_catalog { tr("Refresh") } else { tr("Fetch Catalog") };
+        let r = ui.add_enabled(idle, egui::Button::new(label));
+        reg(app, "settings.library.refresh", &r, "Refresh");
+        if r.clicked() {
+            acts.push(Act::Run("library.refresh".into(), json!({})));
+        }
+        let updates = packages.iter().filter(|p| p["updateAvailable"].as_bool().unwrap_or(false)).count();
+        if updates > 0 {
+            let r = ui.add_enabled(idle, egui::Button::new(tr_args("Update All ({})", &[&updates])));
+            reg(app, "settings.library.updateAll", &r, "Update All");
+            if r.clicked() {
+                acts.push(Act::Run("library.update".into(), json!({})));
+            }
+        }
+    });
+}
+
+/// One package of the Plug-in Library (`library.list`'s entry `p`): name, state, details, links,
+/// actions and, when shown, its preview.
+fn library_card_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, p: &Value, idle: bool, acts: &mut Vec<Act>) {
+    let id = p["id"].as_str().unwrap_or_default().to_string();
+    let s = |k: &str| p[k].as_str().unwrap_or_default().to_string();
+    let installed = p["installed"].as_str().map(str::to_string);
+    let (update, restart, newer_app) =
+        (p["updateAvailable"].as_bool().unwrap_or(false), p["restartNeeded"].as_bool().unwrap_or(false), p["needsNewerApp"].as_bool().unwrap_or(false));
+    egui::Frame::new().fill(t.field_bg).corner_radius(6.0).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(s("name")).font(Tokens::semibold(12.5)));
+            if let Some(v) = p["latest"].as_str() {
+                ui.label(RichText::new(v).color(t.text_dim));
+            }
+            let state = match (&installed, restart, update) {
+                (_, true, _) => tr("Restart EffectCraft to finish").to_string(),
+                (Some(v), _, true) => tr_args("Installed {}: update available", &[v]),
+                (Some(v), _, _) => tr_args("Installed {}", &[v]),
+                (None, _, _) if newer_app && p["latest"].is_null() => tr("Needs a newer EffectCraft").to_string(),
+                _ => String::new(),
+            };
+            ui.label(RichText::new(state).color(if installed.is_some() { t.accent } else { t.text_dim }));
+        });
+        if !s("description").is_empty() {
+            ui.label(RichText::new(s("description")).color(t.text_dim));
+        }
+        library_links_ui(app, ui, t, p, &id);
+        let effects: Vec<&str> = p["effects"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        if !effects.is_empty() {
+            ui.label(RichText::new(tr_args("Effects: {}", &[&effects.join(", ")])).color(t.text_faint));
+        }
+        library_actions_ui(app, ui, p, &id, idle, acts);
+        if app.dialog_state.library_preview.as_deref() == Some(id.as_str()) {
+            library_preview_ui(app, ui, t, &id);
+        }
+    });
+}
+
+/// A package's author, licence, size, and links to its source and video.
+fn library_links_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, p: &Value, id: &str) {
+    let s = |k: &str| p[k].as_str().unwrap_or_default().to_string();
+    ui.horizontal_wrapped(|ui| {
+        if !s("author").is_empty() {
+            ui.label(RichText::new(tr_args("By {}", &[&s("author")])).color(t.text_dim));
+        }
+        if !s("license").is_empty() {
+            ui.label(RichText::new(tr_args("Licence: {}", &[&s("license")])).color(t.text_dim));
+        }
+        if let Some(size) = p["size"].as_u64() {
+            ui.label(RichText::new(format!("·  {}", human_bytes(size))).color(t.text_dim));
+        }
+        let repo = s("repo");
+        if repo.starts_with("https://") {
+            let label = if repo.starts_with("https://github.com/") { tr("Open on GitHub") } else { tr("Source") };
+            let r = ui.link(label);
+            reg(app, &format!("settings.library.repo.{id}"), &r, "Source");
+            if r.clicked() {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(repo));
+            }
+        }
+        let video = s("video");
+        if video.starts_with("https://") {
+            let r = ui.link(tr("Watch video"));
+            reg(app, &format!("settings.library.video.{id}"), &r, "Watch video");
+            if r.clicked() {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(video));
+            }
+        }
+    });
+}
+
+/// A package's Preview / Install / Update / Remove buttons.
+fn library_actions_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &Value, id: &str, idle: bool, acts: &mut Vec<Act>) {
+    let installed = p["installed"].is_string();
+    let available = !p["latest"].is_null();
+    let showing = app.dialog_state.library_preview.as_deref() == Some(id);
+    ui.horizontal(|ui| {
+        if available {
+            let r = ui.add_enabled(idle || showing, egui::Button::new(if showing { tr("Hide Preview") } else { tr("Preview") }).selected(showing));
+            reg(app, &format!("settings.library.preview.{id}"), &r, "Preview");
+            if r.clicked() {
+                if showing {
+                    app.dialog_state.library_preview = None;
+                } else {
+                    app.dialog_state.library_preview = Some(id.to_string());
+                    app.dialog_state.library_split = 0.5;
+                    acts.push(Act::Run("library.preview".into(), json!({"id": id})));
+                }
+            }
+        }
+        let buttons = [
+            (!installed && available, tr("Install"), "Install", "install", "library.install"),
+            (p["updateAvailable"].as_bool().unwrap_or(false), tr("Update"), "Update", "update", "library.update"),
+            (installed, tr("Remove"), "Remove", "remove", "library.uninstall"),
+        ];
+        for (shown, label, name, key, command) in buttons {
+            if !shown {
+                continue;
+            }
+            let r = ui.add_enabled(idle, egui::Button::new(label));
+            reg(app, &format!("settings.library.{key}.{id}"), &r, name);
+            if r.clicked() {
+                acts.push(Act::Run(command.into(), json!({"id": id})));
+            }
+        }
+    });
 }
 
 /// A package's live preview (`library.preview`): its effect at default settings on the sample
